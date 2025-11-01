@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: absurd-example-db
+    environment:
+      POSTGRES_USER: absurd
+      POSTGRES_PASSWORD: absurd
+      POSTGRES_DB: absurd
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations/absurd.sql:/docker-entrypoint-initdb.d/01-absurd.sql
+      - ./db/init.sql:/docker-entrypoint-initdb.d/02-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U absurd"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: absurd-example:latest
+    container_name: absurd-example-api
+    ports:
+      - "18080:8080"
+    environment:
+      DATABASE_URL: "postgres://absurd:absurd@postgres:5432/absurd?sslmode=disable"
+      PORT: "8080"
+    command: ["-mode", "api"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    image: absurd-example:latest
+    environment:
+      DATABASE_URL: "postgres://absurd:absurd@postgres:5432/absurd?sslmode=disable"
+    command: ["-mode", "worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+
+  webhook-site:
+    image: hashicorp/http-echo:latest
+    command: ["-text", "Hello, World!"]
+
+volumes:
+  postgres_data:
