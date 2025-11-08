@@ -300,3 +300,6 @@ make db-shell
 - [Absurd Documentation](../README.md)
 - [absurdctl CLI](../absurdctl)
 - [Migration Files](../migrations/)
+
+- [Absurd Workflows](https://lucumr.pocoo.org/2025/11/3/absurd-workflows/)
+- [Indeed Worfklow Framework] (https://github.com/indeedeng/iwf)
