@@ -10,4 +10,5 @@ Added some generics support but i'm not too sure about it, current example works
 - dispatches a task
 - a task picks it up, dispatches another task
 - a final task sends out the webhook based on some db configuration
-- 
+
+See docs and notes in [here](./example/README.md)

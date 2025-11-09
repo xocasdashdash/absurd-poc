@@ -303,3 +303,5 @@ make db-shell
 
 - [Absurd Workflows](https://lucumr.pocoo.org/2025/11/3/absurd-workflows/)
 - [Indeed Worfklow Framework] (https://github.com/indeedeng/iwf)
+- [Hackernews post about absurd](https://news.ycombinator.com/item?id=45797228)
+- [Highway DSL](https://github.com/rodmena-limited/highway_dsl)
