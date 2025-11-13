@@ -12,10 +12,26 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // --- Public Types (Options & Payloads) ---
+
+// Tx represents a database transaction interface that supports
+// executing queries within a transaction context.
+// This interface is compatible with pgx.Tx and allows for easier testing.
+type Tx interface {
+	// Exec executes a query that doesn't return rows (INSERT, UPDATE, DELETE, etc.)
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	
+	// Query executes a query that returns multiple rows
+	Query(ctx context.Context, sql string, arguments ...interface{}) (pgx.Rows, error)
+	
+	// QueryRow executes a query that returns a single row
+	QueryRow(ctx context.Context, sql string, arguments ...interface{}) pgx.Row
+}
 
 // JsonObject represents a JSON object.
 type JsonObject = map[string]any
@@ -169,14 +185,14 @@ func (c *TaskContext[P, R]) lookupCheckpoint(ctx context.Context, checkpointName
 }
 
 // persistCheckpoint remains internal and takes `any` to marshal.
-func (c *TaskContext[P, R]) persistCheckpoint(ctx context.Context, checkpointName string, value any) error {
+func (c *TaskContext[P, R]) persistCheckpoint(ctx context.Context, tx Tx, checkpointName string, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to marshal checkpoint state: %w", err)
 	}
 
 	query := `SELECT absurd.set_task_checkpoint_state($1, $2, $3, $4, $5, $6)`
-	_, err = c.pool.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		c.queueName,
 		c.task.TaskID,
 		checkpointName,
@@ -194,7 +210,9 @@ func (c *TaskContext[P, R]) persistCheckpoint(ctx context.Context, checkpointNam
 // Step executes a function idempotently, caching its result.
 // It is generic over the return type TResult, allowing each step to have its own type.
 // This is a standalone generic function that works with any TaskContext.
-func Step[P any, R any, TResult any](taskCtx *TaskContext[P, R], ctx context.Context, name string, fn func() (TResult, error)) (TResult, error) {
+// The step function receives a context and database transaction that is automatically committed
+// after successful execution and checkpoint persistence, or rolled back on error.
+func Step[P any, R any, TResult any](taskCtx *TaskContext[P, R], ctx context.Context, name string, fn func(ctx context.Context, tx Tx) (TResult, error)) (TResult, error) {
 	checkpointName := taskCtx.getCheckpointName(name)
 	
 	// zero-value for the return type TResult
@@ -212,16 +230,36 @@ func Step[P any, R any, TResult any](taskCtx *TaskContext[P, R], ctx context.Con
 		return result, nil
 	}
 
-	// No checkpoint, run the function
-	result, err = fn()
+	// No checkpoint, begin a transaction and run the function
+	tx, err := taskCtx.pool.Begin(ctx)
 	if err != nil {
+		return result, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	// Execute the step function with the context and transaction
+	result, err = fn(ctx, tx)
+	if err != nil {
+		// Rollback transaction on error
+		if rbErr := tx.Rollback(ctx); rbErr != nil {
+			return result, fmt.Errorf("step failed and rollback also failed: %w (rollback error: %v)", err, rbErr)
+		}
 		return result, err
 	}
 
-	// Persist the result
-	if err := taskCtx.persistCheckpoint(ctx, checkpointName, result); err != nil {
+	// Persist the result within the same transaction
+	if err := taskCtx.persistCheckpoint(ctx, tx, checkpointName, result); err != nil {
+		// Rollback transaction on checkpoint persistence error
+		if rbErr := tx.Rollback(ctx); rbErr != nil {
+			return result, fmt.Errorf("checkpoint persistence failed and rollback also failed: %w (rollback error: %v)", err, rbErr)
+		}
 		return result, err
 	}
+
+	// Commit the transaction
+	if err := tx.Commit(ctx); err != nil {
+		return result, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
 	return result, nil
 }
 
@@ -248,9 +286,19 @@ func (c *TaskContext[P, R]) SleepUntil(ctx context.Context, stepName string, wak
 			}
 		}
 	} else {
-		// If no checkpoint, persist the wake-up time
-		if err := c.persistCheckpoint(ctx, checkpointName, actualWakeAt.Format(time.RFC3339Nano)); err != nil {
+		// If no checkpoint, persist the wake-up time within a transaction
+		tx, err := c.pool.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		if err := c.persistCheckpoint(ctx, tx, checkpointName, actualWakeAt.Format(time.RFC3339Nano)); err != nil {
+			if rbErr := tx.Rollback(ctx); rbErr != nil {
+				return fmt.Errorf("checkpoint persistence failed and rollback also failed: %w (rollback error: %v)", err, rbErr)
+			}
 			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
 		}
 	}
 

@@ -45,6 +45,11 @@ type ProcessPaymentResult struct {
 ### 2. Create a Single Client
 
 ```go
+import (
+    "context"
+    "github.com/xocasdashdash/absurd-poc/absurd/client"
+)
+
 // Use any/any types for the base client
 absurdClient, err := client.New[any, any](ctx, dbURL, "default", 3)
 if err != nil {
@@ -64,9 +69,9 @@ err = client.RegisterTypedTask(
         // params is SendEmailParams - no type assertions needed!
         log.Printf("Sending email to %s", params.To)
         
-        // Use typed steps
-        messageID, err := client.TypedStep(taskCtx, ctx, "send", func() (string, error) {
-            // Send the email
+        // Use typed steps with transaction support
+        messageID, err := client.TypedStep(taskCtx, ctx, "send", func(ctx context.Context, tx client.Tx) (string, error) {
+            // Send the email (can use tx for database queries)
             return "msg-123", nil
         })
         if err != nil {
@@ -91,9 +96,9 @@ err = client.RegisterTypedTask(
         // params is ProcessPaymentParams
         log.Printf("Processing payment for order %s: $%.2f", params.OrderID, params.Amount)
         
-        // Use typed steps with different return types
-        txnID, err := client.TypedStep(taskCtx, ctx, "charge-card", func() (string, error) {
-            // Charge the card
+        // Use typed steps with different return types and transaction support
+        txnID, err := client.TypedStep(taskCtx, ctx, "charge-card", func(ctx context.Context, tx client.Tx) (string, error) {
+            // Charge the card (can use tx for database queries)
             return "txn-456", nil
         })
         if err != nil {

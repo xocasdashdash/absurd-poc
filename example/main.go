@@ -247,8 +247,8 @@ func runWorker(ctx context.Context, dbURL string) {
 				params.Event.EventName, params.Event.OrganizationID)
 
 			// Step 1: Query destinations from database
-			destinations, err := client.TypedStep(taskCtx, ctx, "query-destinations", func() ([]Destination, error) {
-				return queryDestinations(db, params.Event.OrganizationID, params.Event.EventName)
+			destinations, err := client.TypedStep(taskCtx, ctx, "query-destinations", func(ctx context.Context, tx client.Tx) ([]Destination, error) {
+				return queryDestinations(ctx, tx, params.Event.OrganizationID, params.Event.EventName)
 			})
 			if err != nil {
 				return EmptyResult{}, fmt.Errorf("failed to query destinations: %w", err)
@@ -263,7 +263,7 @@ func runWorker(ctx context.Context, dbURL string) {
 			}
 
 			// Step 2: Spawn send-webhook tasks for each destination
-			_, err = client.TypedStep(taskCtx, ctx, "spawn-webhook-tasks", func() (int, error) {
+			_, err = client.TypedStep(taskCtx, ctx, "spawn-webhook-tasks", func(ctx context.Context, tx client.Tx) (int, error) {
 				count := 0
 				for _, dest := range destinations {
 					webhookParams := SendWebhookParams{
@@ -321,7 +321,7 @@ func runWorker(ctx context.Context, dbURL string) {
 				params.DestinationURL, params.DestinationID)
 
 			// Step 1: Send HTTP POST request
-			_, err := client.TypedStep(taskCtx, ctx, "http-post", func() (string, error) {
+			_, err := client.TypedStep(taskCtx, ctx, "http-post", func(ctx context.Context, tx client.Tx) (string, error) {
 				return sendWebhookHTTP(params.DestinationURL, params.Event)
 			})
 			if err != nil {
@@ -363,14 +363,14 @@ func runWorker(ctx context.Context, dbURL string) {
 }
 
 // queryDestinations fetches webhook destinations from the database
-func queryDestinations(db *sql.DB, organizationID, eventName string) ([]Destination, error) {
+func queryDestinations(ctx context.Context, tx client.Tx, organizationID, eventName string) ([]Destination, error) {
 	query := `
 		SELECT id, organization_id, event_name, webhook_url
 		FROM notification_destinations
 		WHERE organization_id = $1 AND event_name = $2 AND enabled = true
 	`
 
-	rows, err := db.Query(query, organizationID, eventName)
+	rows, err := tx.Query(ctx, query, organizationID, eventName)
 	if err != nil {
 		return nil, fmt.Errorf("database query failed: %w", err)
 	}

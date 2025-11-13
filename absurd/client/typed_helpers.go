@@ -78,14 +78,14 @@ func SpawnTypedTask[P any](
 //
 // Example:
 //
-//	users, err := absurd.TypedStep(taskCtx, ctx, "fetch-users", func() ([]User, error) {
-//	    return fetchUsersFromDB()
+//	users, err := absurd.TypedStep(taskCtx, ctx, "fetch-users", func(ctx context.Context, tx client.Tx) ([]User, error) {
+//	    return fetchUsersFromDB(ctx, tx)
 //	})
 func TypedStep[TResult any](
 	taskCtx *TaskContext[any, any],
 	ctx context.Context,
 	name string,
-	fn func() (TResult, error),
+	fn func(ctx context.Context, tx Tx) (TResult, error),
 ) (TResult, error) {
 	return Step[any, any, TResult](taskCtx, ctx, name, fn)
 }
